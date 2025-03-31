@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>動画フレームキャプチャツール</title>
   <style>
+    /* 基本スタイル */
     body {
       font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
       background-color: #f8f9fa;
@@ -27,7 +28,7 @@
       background-color: #ffffff;
       width: 90%;
       max-width: 600px;
-      transition: background-color 0.3s, border-color 0.3s;
+      transition: background-color 0.3s, border-color 0.3s, transform 0.3s, box-shadow 0.3s;
     }
     .upload-area:hover {
       background-color: #e9ecef;
@@ -36,6 +37,8 @@
     .upload-area.dragover {
       border-color: #495057;
       background-color: #e2e6ea;
+      transform: scale(1.02);
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
     }
     #control-panel {
       margin-top: 20px;
@@ -58,6 +61,14 @@
       display: block;
       text-align: right;
     }
+    /* スライダーの増減ボタン */
+    #slider-controls {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    /* キャプチャプレビュー */
     #preview-container {
       margin-top: 20px;
       width: 90%;
@@ -108,29 +119,99 @@
     #clear-button:hover {
       background-color: #c82333;
     }
+    /* 言語切替ボタン */
+    #lang-toggle {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      padding: 5px 10px;
+      font-size: 14px;
+    }
+    /* 事前設定用モーダル */
+    #preupload-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: none; /* 初期表示はしない */
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    #preupload-modal .modal-content {
+      background: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      width: 90%;
+      max-width: 400px;
+    }
+    #preupload-modal h2 {
+      margin-top: 0;
+    }
+    /* レスポンシブ対応 */
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+      }
+      .upload-area, #control-panel, #preview-container {
+        width: 100%;
+        max-width: none;
+      }
+      button {
+        font-size: 14px;
+        padding: 8px 16px;
+      }
+    }
   </style>
 </head>
 <body>
+  <!-- 事前設定モーダル -->
+  <div id="preupload-modal">
+    <div class="modal-content">
+      <!-- 言語切替可能にするため、IDを付与してJSから更新 -->
+      <h2 id="modal-title">キャプチャ設定</h2>
+      <label id="modal-message" for="preupload-resolution">解像度を選択してください:</label>
+      <select id="preupload-resolution">
+         <!-- 「中」を削除し、低と高のみ残す -->
+         <option value="low">低 (約200KB前後)</option>
+         <option value="high">高 (元動画の解像度)</option>
+      </select>
+      <br><br>
+      <button id="preupload-save-button">設定を保存して開始</button>
+    </div>
+  </div>
+
+  <!-- 言語切替ボタン -->
+  <button id="lang-toggle">English</button>
+
   <h1>動画フレームキャプチャツール</h1>
-  <div id="upload-area" class="upload-area">
+  <!-- label for="file-input" を残し、clickイベントは削除して二重呼び出しを防ぐ -->
+  <label for="file-input" id="upload-area" class="upload-area">
     <p>ここにmp4ファイルをドラッグ＆ドロップするか、クリックしてファイルを選択してください</p>
-    <input type="file" id="file-input" accept="video/mp4" style="display:none">
-  </div>
+  </label>
+  <input type="file" id="file-input" accept="video/mp4" style="display:none">
 
-  <!-- コントロールパネル：スライダーと現在時刻表示 -->
+  <!-- コントロールパネル：スライダー・現在時刻表示、増減ボタン -->
   <div id="control-panel">
-    <label for="time-slider">動画の位置を選択:</label>
+    <label for="time-slider" id="slider-label">動画の位置を選択:</label>
     <input type="range" id="time-slider" step="0.1" value="0">
-    <span id="time-label">0:00 / 0:00</span>
+    <span id="time-label">0.0 / 0.0</span>
+    <div id="slider-controls">
+      <button id="decrement-button">-0.1秒</button>
+      <button id="increment-button">+0.1秒</button>
+    </div>
   </div>
 
-  <!-- 動画・キャンバスは非表示で利用 -->
+  <!-- 動画・キャンバス（非表示） -->
   <video id="video" style="display:none"></video>
   <canvas id="canvas" style="display:none"></canvas>
 
   <!-- キャプチャプレビューと保存ボタン -->
   <div id="preview-container">
-    <h3>キャプチャ画像プレビュー</h3>
+    <h3 id="preview-title">キャプチャ画像プレビュー</h3>
     <img id="preview-image" alt="Captured Frame Preview">
     <p id="file-size-info"></p>
     <div class="button-group">
@@ -140,106 +221,252 @@
   </div>
 
   <script>
-    const uploadArea = document.getElementById('upload-area');
+    // 言語ごとのテキスト設定
+    const langTexts = {
+      ja: {
+        title: "動画フレームキャプチャツール",
+        uploadText: "ここにmp4ファイルをドラッグ＆ドロップするか、クリックしてファイルを選択してください",
+        controlLabel: "動画の位置を選択:",
+        previewTitle: "キャプチャ画像プレビュー",
+        save: "保存",
+        clear: "クリア",
+        decrement: "-0.1秒",
+        increment: "+0.1秒",
+        videoError: "動画の読み込みに失敗しました。ファイル形式やファイル自体を確認してください。",
+        fileSizeText: "推定容量: ",
+        // 事前設定モーダル
+        capSettingTitle: "キャプチャ設定",
+        capSettingMessage: "解像度を選択してください:",
+        capSettingApply: "設定を保存して開始",
+        // 解像度選択オプション
+        resolutionOptions: {
+          low: "低 (約200KB前後)",
+          high: "高 (元動画の解像度)"
+        }
+      },
+      en: {
+        title: "Video Frame Capture Tool",
+        uploadText: "Drag & drop an mp4 file here or click to select a file",
+        controlLabel: "Select video position:",
+        previewTitle: "Captured Frame Preview",
+        save: "Save",
+        clear: "Clear",
+        decrement: "-0.1 sec",
+        increment: "+0.1 sec",
+        videoError: "Failed to load video. Please check the file format or file itself.",
+        fileSizeText: "Estimated size: ",
+        // 事前設定モーダル
+        capSettingTitle: "Capture Settings",
+        capSettingMessage: "Select resolution:",
+        capSettingApply: "Save and Start",
+        // 解像度選択オプション
+        resolutionOptions: {
+          low: "Low (approx. 200KB)",
+          high: "High (Original resolution)"
+        }
+      }
+    };
+
+    let currentLang = 'ja'; // 初期は日本語
+    let selectedResolution = "low"; // 事前設定された解像度（初期値）
+
+    // DOM要素の取得
+    const langToggle = document.getElementById('lang-toggle');
+    const h1 = document.querySelector('h1');
+    const uploadTextP = document.querySelector('#upload-area p');
+    const sliderLabel = document.getElementById('slider-label');
+    const timeLabel = document.getElementById('time-label');
+    const previewTitle = document.getElementById('preview-title');
+    const saveButton = document.getElementById('save-button');
+    const clearButton = document.getElementById('clear-button');
+    const decrementButton = document.getElementById('decrement-button');
+    const incrementButton = document.getElementById('increment-button');
+    const fileSizeInfo = document.getElementById('file-size-info');
+    const previewImage = document.getElementById('preview-image');
+    const previewContainer = document.getElementById('preview-container');
     const fileInput = document.getElementById('file-input');
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const controlPanel = document.getElementById('control-panel');
     const timeSlider = document.getElementById('time-slider');
-    const timeLabel = document.getElementById('time-label');
-    const previewContainer = document.getElementById('preview-container');
-    const previewImage = document.getElementById('preview-image');
-    const fileSizeInfo = document.getElementById('file-size-info');
-    const saveButton = document.getElementById('save-button');
-    const clearButton = document.getElementById('clear-button');
+    const preuploadModal = document.getElementById('preupload-modal');
+    const preuploadResolution = document.getElementById('preupload-resolution');
+    const preuploadSaveButton = document.getElementById('preupload-save-button');
+    const modalTitle = document.getElementById('modal-title');
+    const modalMessage = document.getElementById('modal-message');
 
-    // 名前付きエラーイベントハンドラ
+    // ◆◆ handleVideoError を定義
     function handleVideoError() {
-      alert("動画の読み込みに失敗しました。ファイル形式やファイル自体を確認してください。");
+      alert(langTexts[currentLang].videoError);
     }
 
-    // ファイルアップロード（ドラッグ＆ドロップ／ファイル選択）の設定
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', function(e) {
+    // ドラッグ＆ドロップ用イベント
+    const uploadArea = document.getElementById('upload-area');
+    uploadArea.addEventListener('dragover', (e) => {
       e.preventDefault();
       uploadArea.classList.add('dragover');
     });
-    uploadArea.addEventListener('dragleave', function(e) {
+    uploadArea.addEventListener('dragleave', (e) => {
       e.preventDefault();
       uploadArea.classList.remove('dragover');
     });
-    uploadArea.addEventListener('drop', function(e) {
+    uploadArea.addEventListener('drop', (e) => {
       e.preventDefault();
       uploadArea.classList.remove('dragover');
       if (e.dataTransfer.files.length > 0) {
         handleFile(e.dataTransfer.files[0]);
       }
     });
-    fileInput.addEventListener('change', function(e) {
-      if (this.files.length > 0) {
-        handleFile(this.files[0]);
+
+    // ファイル選択時の処理
+    fileInput.addEventListener('change', (e) => {
+      if (fileInput.files.length > 0) {
+        handleFile(fileInput.files[0]);
       }
     });
 
-    // ファイル処理：mp4かどうかの確認と動画読み込み
+    // 言語切替
+    function updateLanguage() {
+      // 全体UI
+      h1.textContent = langTexts[currentLang].title;
+      uploadTextP.textContent = langTexts[currentLang].uploadText;
+      sliderLabel.textContent = langTexts[currentLang].controlLabel;
+      previewTitle.textContent = langTexts[currentLang].previewTitle;
+      saveButton.textContent = langTexts[currentLang].save;
+      clearButton.textContent = langTexts[currentLang].clear;
+      decrementButton.textContent = langTexts[currentLang].decrement;
+      incrementButton.textContent = langTexts[currentLang].increment;
+      langToggle.textContent = (currentLang === 'ja') ? "English" : "日本語";
+
+      // モーダル文言
+      modalTitle.textContent = langTexts[currentLang].capSettingTitle;
+      modalMessage.textContent = langTexts[currentLang].capSettingMessage;
+      preuploadSaveButton.textContent = langTexts[currentLang].capSettingApply;
+
+      // 解像度オプションの文言 (低 / 高 のみ)
+      const optionLow = preuploadResolution.querySelector('option[value="low"]');
+      const optionHigh = preuploadResolution.querySelector('option[value="high"]');
+      if(optionLow && optionHigh) {
+        optionLow.textContent = langTexts[currentLang].resolutionOptions.low;
+        optionHigh.textContent = langTexts[currentLang].resolutionOptions.high;
+      }
+    }
+
+    langToggle.addEventListener('click', () => {
+      currentLang = (currentLang === 'ja') ? 'en' : 'ja';
+      updateLanguage();
+    });
+    updateLanguage();
+
+    // 毎回ファイル処理前にモーダルを表示して解像度を設定
     function handleFile(file) {
-      if (file.type !== "video/mp4") {
+      console.log("handleFile:", file.name, file.type);
+      // MIME タイプまたは拡張子チェック
+      if ((!file.type || !file.type.match(/video\/mp4/)) && !file.name.toLowerCase().endsWith('.mp4')) {
         alert("mp4ファイルを選択してください");
         return;
       }
-      resetState(); // 既存状態をリセット（エラーリスナーも削除）
+      resetState();
+      // モーダルを表示
+      preuploadModal.style.display = 'flex';
+      // 「設定を保存して開始」クリック時にファイル処理を開始
+      preuploadSaveButton.onclick = function() {
+        selectedResolution = preuploadResolution.value;
+        preuploadModal.style.display = 'none';
+        processFile(file);
+      };
+    }
+
+    // 実際の動画読み込み処理
+    function processFile(file) {
       video.src = URL.createObjectURL(file);
       video.load();
-
-      // エラーイベントリスナーの登録
+      // エラーイベント登録
       video.addEventListener('error', handleVideoError, { once: true });
-
+      // メタデータ読み込み後の処理
       video.addEventListener('loadedmetadata', function() {
-        // コントロールパネルの表示とスライダーの設定
+        const duration = video.duration || 0;
         controlPanel.style.display = 'block';
-        timeSlider.min = 0;
-        timeSlider.max = video.duration;
-        timeSlider.value = video.duration; // 初期は最後のフレーム
-        updateTimeLabel(video.duration, video.duration);
-        // 初期キャプチャ：動画の最後の0.1秒前
-        video.currentTime = Math.max(0, video.duration - 0.1);
+
+        // 極端に短い動画の場合は 0 秒をキャプチャ
+        if (duration < 0.1) {
+          timeSlider.min = 0;
+          timeSlider.max = duration;
+          timeSlider.value = 0;
+          updateTimeLabel(0, duration);
+          video.currentTime = 0;
+        } else {
+          timeSlider.min = 0;
+          timeSlider.max = duration;
+          timeSlider.value = duration; // 初期は最後のフレーム
+          updateTimeLabel(duration, duration);
+          video.currentTime = Math.max(0, duration - 0.1);
+        }
       }, { once: true });
     }
 
-    // 動画のシーク後にキャプチャを行う
+    // seeked後にキャプチャ
     video.addEventListener('seeked', function() {
       captureFrame();
     });
 
-    // スライダー操作時の処理：動画の位置を更新し、現在時刻を表示
+    // スライダー操作
     timeSlider.addEventListener('input', function() {
       const time = parseFloat(this.value);
       video.currentTime = time;
       updateTimeLabel(time, video.duration);
     });
+    decrementButton.addEventListener('click', () => {
+      let newTime = parseFloat(timeSlider.value) - 0.1;
+      if(newTime < parseFloat(timeSlider.min)) newTime = parseFloat(timeSlider.min);
+      timeSlider.value = newTime;
+      video.currentTime = newTime;
+      updateTimeLabel(newTime, video.duration);
+    });
+    incrementButton.addEventListener('click', () => {
+      let newTime = parseFloat(timeSlider.value) + 0.1;
+      if(newTime > parseFloat(timeSlider.max)) newTime = parseFloat(timeSlider.max);
+      timeSlider.value = newTime;
+      video.currentTime = newTime;
+      updateTimeLabel(newTime, video.duration);
+    });
 
-    // キャプチャ処理：キャンバスに描画して、JPEG画像（約200KB）を生成
+    // キャプチャ処理
     function captureFrame() {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      let scaleFactor = 1;
+      // 「低」を選んだ場合のみスケールダウン & 200KB調整
+      if (selectedResolution === "low") {
+        scaleFactor = 0.5;
+      }
+      canvas.width = Math.floor(video.videoWidth * scaleFactor);
+      canvas.height = Math.floor(video.videoHeight * scaleFactor);
+
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const targetSize = 200 * 1024; // 約200KB
-      const dataURL = adjustQuality(canvas, targetSize);
+      let dataURL;
+      if (selectedResolution === "high") {
+        // 高: 元動画の解像度・品質1.0
+        dataURL = canvas.toDataURL('image/jpeg', 1.0);
+      } else {
+        // 低: 約200KB目標で品質調整
+        let targetSize = 200 * 1024; // 200KB
+        dataURL = adjustQuality(canvas, targetSize);
+      }
 
-      // プレビュー画像と推定容量の更新
       previewImage.src = dataURL;
-      fileSizeInfo.textContent = "推定容量: " + (dataURLtoFileSize(dataURL) / 1024).toFixed(1) + " KB";
+      fileSizeInfo.textContent = langTexts[currentLang].fileSizeText +
+          (dataURLtoFileSize(dataURL) / 1024).toFixed(1) + " KB";
       previewContainer.style.display = 'block';
     }
 
-    // JPEG品質を調整して、約200KBに近いデータURLを生成する関数
+    // データURLのファイルサイズ計算
     function dataURLtoFileSize(dataURL) {
       const base64Str = dataURL.split(',')[1];
       return Math.round(base64Str.length * 3 / 4);
     }
 
+    // JPEG品質を調整してターゲットサイズに近づける
     function adjustQuality(canvas, targetSize, minQuality = 0.1, maxQuality = 1.0) {
       let low = minQuality;
       let high = maxQuality;
@@ -247,7 +474,6 @@
       let bestDataURL = canvas.toDataURL('image/jpeg', quality);
       let bestDiff = Math.abs(dataURLtoFileSize(bestDataURL) - targetSize);
 
-      // 10回のバイナリサーチで品質を調整
       for (let i = 0; i < 10; i++) {
         quality = (low + high) / 2;
         const dataURL = canvas.toDataURL('image/jpeg', quality);
@@ -258,7 +484,6 @@
           bestDiff = Math.abs(diff);
           bestDataURL = dataURL;
         }
-
         if (diff > 0) {
           high = quality;
         } else {
@@ -268,17 +493,17 @@
       return bestDataURL;
     }
 
-    // 現在時刻と動画全体の長さを表示する関数
+    // 時刻表示更新（0.1秒単位）
     function updateTimeLabel(current, duration) {
       function formatTime(t) {
         const minutes = Math.floor(t / 60);
-        const seconds = Math.floor(t % 60);
+        const seconds = (t % 60).toFixed(1);
         return minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
       }
       timeLabel.textContent = formatTime(current) + " / " + formatTime(duration);
     }
 
-    // 保存ボタン：プレビュー画像をダウンロード（ブラウザの保存ダイアログ経由）
+    // 保存ボタン
     saveButton.addEventListener('click', function() {
       const dataURL = previewImage.src;
       const link = document.createElement('a');
@@ -289,22 +514,22 @@
       document.body.removeChild(link);
     });
 
-    // クリアボタン：全体の状態を初期状態にリセット
+    // クリアボタン
     clearButton.addEventListener('click', function() {
       resetState();
     });
 
-    // 初期状態に戻す関数（エラーイベントリスナーも削除）
+    // 初期状態に戻す
     function resetState() {
-      // 動画のエラーリスナーを削除
+      // エラーリスナーを削除
       video.removeEventListener('error', handleVideoError);
-      // リソースの解放
       video.src = "";
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
       controlPanel.style.display = 'none';
       previewContainer.style.display = 'none';
       timeSlider.value = 0;
-      timeLabel.textContent = "0:00 / 0:00";
+      timeLabel.textContent = "0.0 / 0.0";
       fileInput.value = "";
     }
   </script>
