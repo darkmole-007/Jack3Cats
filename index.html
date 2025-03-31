@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>動画フレームキャプチャツール</title>
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #f8f9fa;
+      color: #343a40;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin-bottom: 20px;
+    }
+    .upload-area {
+      border: 2px dashed #6c757d;
+      border-radius: 8px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      background-color: #ffffff;
+      width: 90%;
+      max-width: 600px;
+      transition: background-color 0.3s, border-color 0.3s;
+    }
+    .upload-area:hover {
+      background-color: #e9ecef;
+      border-color: #495057;
+    }
+    .upload-area.dragover {
+      border-color: #495057;
+      background-color: #e2e6ea;
+    }
+    #control-panel {
+      margin-top: 20px;
+      width: 90%;
+      max-width: 600px;
+      background-color: #ffffff;
+      border: 1px solid #ced4da;
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: none;
+    }
+    #time-slider {
+      width: 100%;
+      margin-top: 10px;
+    }
+    #time-label {
+      font-size: 14px;
+      margin-top: 5px;
+      display: block;
+      text-align: right;
+    }
+    #preview-container {
+      margin-top: 20px;
+      width: 90%;
+      max-width: 600px;
+      background-color: #ffffff;
+      border: 1px solid #ced4da;
+      border-radius: 8px;
+      padding: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      text-align: center;
+      display: none;
+    }
+    #preview-image {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #dee2e6;
+      margin-bottom: 10px;
+    }
+    #file-size-info {
+      font-size: 14px;
+      margin-bottom: 10px;
+      color: #555;
+    }
+    .button-group {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    #save-button {
+      background-color: #28a745;
+      color: #fff;
+    }
+    #save-button:hover {
+      background-color: #218838;
+    }
+    #clear-button {
+      background-color: #dc3545;
+      color: #fff;
+    }
+    #clear-button:hover {
+      background-color: #c82333;
+    }
+  </style>
+</head>
+<body>
+  <h1>動画フレームキャプチャツール</h1>
+  <div id="upload-area" class="upload-area">
+    <p>ここにmp4ファイルをドラッグ＆ドロップするか、クリックしてファイルを選択してください</p>
+    <input type="file" id="file-input" accept="video/mp4" style="display:none">
+  </div>
+
+  <!-- コントロールパネル：スライダーと現在時刻表示 -->
+  <div id="control-panel">
+    <label for="time-slider">動画の位置を選択:</label>
+    <input type="range" id="time-slider" step="0.1" value="0">
+    <span id="time-label">0:00 / 0:00</span>
+  </div>
+
+  <!-- 動画・キャンバスは非表示で利用 -->
+  <video id="video" style="display:none"></video>
+  <canvas id="canvas" style="display:none"></canvas>
+
+  <!-- キャプチャプレビューと保存ボタン -->
+  <div id="preview-container">
+    <h3>キャプチャ画像プレビュー</h3>
+    <img id="preview-image" alt="Captured Frame Preview">
+    <p id="file-size-info"></p>
+    <div class="button-group">
+      <button id="save-button">保存</button>
+      <button id="clear-button">クリア</button>
+    </div>
+  </div>
+
+  <script>
+    const uploadArea = document.getElementById('upload-area');
+    const fileInput = document.getElementById('file-input');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const controlPanel = document.getElementById('control-panel');
+    const timeSlider = document.getElementById('time-slider');
+    const timeLabel = document.getElementById('time-label');
+    const previewContainer = document.getElementById('preview-container');
+    const previewImage = document.getElementById('preview-image');
+    const fileSizeInfo = document.getElementById('file-size-info');
+    const saveButton = document.getElementById('save-button');
+    const clearButton = document.getElementById('clear-button');
+
+    // 名前付きエラーイベントハンドラ
+    function handleVideoError() {
+      alert("動画の読み込みに失敗しました。ファイル形式やファイル自体を確認してください。");
+    }
+
+    // ファイルアップロード（ドラッグ＆ドロップ／ファイル選択）の設定
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    uploadArea.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+    });
+    uploadArea.addEventListener('drop', function(e) {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+    fileInput.addEventListener('change', function(e) {
+      if (this.files.length > 0) {
+        handleFile(this.files[0]);
+      }
+    });
+
+    // ファイル処理：mp4かどうかの確認と動画読み込み
+    function handleFile(file) {
+      if (file.type !== "video/mp4") {
+        alert("mp4ファイルを選択してください");
+        return;
+      }
+      resetState(); // 既存状態をリセット（エラーリスナーも削除）
+      video.src = URL.createObjectURL(file);
+      video.load();
+
+      // エラーイベントリスナーの登録
+      video.addEventListener('error', handleVideoError, { once: true });
+
+      video.addEventListener('loadedmetadata', function() {
+        // コントロールパネルの表示とスライダーの設定
+        controlPanel.style.display = 'block';
+        timeSlider.min = 0;
+        timeSlider.max = video.duration;
+        timeSlider.value = video.duration; // 初期は最後のフレーム
+        updateTimeLabel(video.duration, video.duration);
+        // 初期キャプチャ：動画の最後の0.1秒前
+        video.currentTime = Math.max(0, video.duration - 0.1);
+      }, { once: true });
+    }
+
+    // 動画のシーク後にキャプチャを行う
+    video.addEventListener('seeked', function() {
+      captureFrame();
+    });
+
+    // スライダー操作時の処理：動画の位置を更新し、現在時刻を表示
+    timeSlider.addEventListener('input', function() {
+      const time = parseFloat(this.value);
+      video.currentTime = time;
+      updateTimeLabel(time, video.duration);
+    });
+
+    // キャプチャ処理：キャンバスに描画して、JPEG画像（約200KB）を生成
+    function captureFrame() {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const targetSize = 200 * 1024; // 約200KB
+      const dataURL = adjustQuality(canvas, targetSize);
+
+      // プレビュー画像と推定容量の更新
+      previewImage.src = dataURL;
+      fileSizeInfo.textContent = "推定容量: " + (dataURLtoFileSize(dataURL) / 1024).toFixed(1) + " KB";
+      previewContainer.style.display = 'block';
+    }
+
+    // JPEG品質を調整して、約200KBに近いデータURLを生成する関数
+    function dataURLtoFileSize(dataURL) {
+      const base64Str = dataURL.split(',')[1];
+      return Math.round(base64Str.length * 3 / 4);
+    }
+
+    function adjustQuality(canvas, targetSize, minQuality = 0.1, maxQuality = 1.0) {
+      let low = minQuality;
+      let high = maxQuality;
+      let quality = 0.8;
+      let bestDataURL = canvas.toDataURL('image/jpeg', quality);
+      let bestDiff = Math.abs(dataURLtoFileSize(bestDataURL) - targetSize);
+
+      // 10回のバイナリサーチで品質を調整
+      for (let i = 0; i < 10; i++) {
+        quality = (low + high) / 2;
+        const dataURL = canvas.toDataURL('image/jpeg', quality);
+        const size = dataURLtoFileSize(dataURL);
+        const diff = size - targetSize;
+
+        if (Math.abs(diff) < bestDiff) {
+          bestDiff = Math.abs(diff);
+          bestDataURL = dataURL;
+        }
+
+        if (diff > 0) {
+          high = quality;
+        } else {
+          low = quality;
+        }
+      }
+      return bestDataURL;
+    }
+
+    // 現在時刻と動画全体の長さを表示する関数
+    function updateTimeLabel(current, duration) {
+      function formatTime(t) {
+        const minutes = Math.floor(t / 60);
+        const seconds = Math.floor(t % 60);
+        return minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
+      }
+      timeLabel.textContent = formatTime(current) + " / " + formatTime(duration);
+    }
+
+    // 保存ボタン：プレビュー画像をダウンロード（ブラウザの保存ダイアログ経由）
+    saveButton.addEventListener('click', function() {
+      const dataURL = previewImage.src;
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = 'captured_frame.jpg';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+
+    // クリアボタン：全体の状態を初期状態にリセット
+    clearButton.addEventListener('click', function() {
+      resetState();
+    });
+
+    // 初期状態に戻す関数（エラーイベントリスナーも削除）
+    function resetState() {
+      // 動画のエラーリスナーを削除
+      video.removeEventListener('error', handleVideoError);
+      // リソースの解放
+      video.src = "";
+      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+      controlPanel.style.display = 'none';
+      previewContainer.style.display = 'none';
+      timeSlider.value = 0;
+      timeLabel.textContent = "0:00 / 0:00";
+      fileInput.value = "";
+    }
+  </script>
+</body>
+</html>
